@@ -15,6 +15,33 @@ let current_style_settings = null;
 let book_saved_pages = null;
 let sessionDictionaryLanguage = "en"
 
+function normalizeChapterHref(href) {
+    return (href || '').split('#')[0];
+}
+
+function getChapterLabelByHref(navigationToc, chapterHref) {
+    const normalizedHref = normalizeChapterHref(chapterHref);
+    for (const chapter of navigationToc || []) {
+        const candidateHref = normalizeChapterHref(chapter.href);
+        if (candidateHref === normalizedHref || candidateHref.includes(normalizedHref) || normalizedHref.includes(candidateHref)) {
+            return chapter.label || 'Untitled chapter';
+        }
+        if (chapter.subitems?.length) {
+            const nestedMatch = getChapterLabelByHref(chapter.subitems, normalizedHref);
+            if (nestedMatch) {
+                return nestedMatch;
+            }
+        }
+    }
+    return null;
+}
+
+function updateReaderNavbarMeta(chapterHref) {
+    const chapterLabel = getChapterLabelByHref(book_epub?.navigation?.toc, chapterHref) || 'Untitled chapter';
+    $('#reader-navbar-chapter').text(chapterLabel);
+    $('#reader-navbar-pill').attr('title', chapterLabel);
+}
+
 var keyListener = function (e) {
 
     // Left Key
@@ -147,6 +174,7 @@ var loadBook = async function(styleSettings = null) {
 
         // Update global variable with current section href
         current_section_href = section.href;
+        updateReaderNavbarMeta(current_section_href);
         // Highlight active chapter in the sidebar
         try {
             $('#book-chapters [data-href]').removeClass('active');
@@ -160,8 +188,10 @@ var loadBook = async function(styleSettings = null) {
     book_rendition.on('relocated', function (location) {
         try {
             const cfi = location?.start?.cfi || book_rendition.currentLocation().start?.cfi;
+            current_section_href = location?.start?.href || current_section_href;
             updatePageNumber(cfi);
             updateSavePagesButton(book_saved_pages, cfi);
+            updateReaderNavbarMeta(current_section_href);
         } catch(e) {}
     });
 
@@ -184,8 +214,13 @@ async function updatePageNumber(cfi) {
     var total_pages = book_epub.locations.total;
     var pct = book_epub.locations.percentageFromCfi(cfi) || 0;
     var progress = Math.floor(pct * total_pages);
-    $('#current_page_value').text(progress);
-    $('#total_page_value').text(total_pages);
+    if ($('#currentPages').hasClass('edit-mode')) {
+        $('#page-number-input').val(progress);
+        $('#total_page_value').text(total_pages);
+    } else {
+        $('#current_page_value').text(progress);
+        $('#total_page_value').text(total_pages);
+    }
     $('#book-info-pages').text(total_pages);
     // Update thin progress bar width
     try { $('#reading-progress-bar').css('width', Math.max(0, Math.min(100, Math.round(pct * 100))) + '%'); } catch(e) {}
@@ -333,7 +368,7 @@ function recursiveChapterHtml(array,level) {
     array.forEach((item) => {
         var op = item.label ? "" : "op-5";
         var bold = level == 1 ? 'text-sb' : '';
-        finalHtml += `<h1 class="main-text ${op} ${bold}" data-href="${item.href}" onclick="book_rendition.display('${item.href}')">${item.label}</h1>`;
+        finalHtml += `<h1 class="main-text ${op} ${bold}" data-href="${item.href}" title="${item.label}" onclick="book_rendition.display('${item.href}')">${item.label}</h1>`;
         if (item.subitems.length > 0) {
             finalHtml += recursiveChapterHtml(item.subitems, level+1);
         }
@@ -710,129 +745,115 @@ var saveBookPageBeforeClose = async function(){
 }
 
 var getCurrentChapterLabelByHref = async function(navigationToc,chapterHref){
-    chapter_title = null;
-    for(const books of navigationToc){
-        if (books.href.includes(chapterHref)){
-            chapter_title = `[${books.label}] Page ${$("#current_page_value").text()}`;
-            break;
-        } else if (books.subitems.length > 0) {
-            var temp_chapter_title = await getCurrentChapterLabelByHref(books.subitems, chapterHref)
-            if (temp_chapter_title != null) {
-                chapter_title = temp_chapter_title;
-                break;
-            } else {
-                chapter_title = `Page ${$("#current_page_value").text()}`;
-            }
-        }
+    const chapterLabel = getChapterLabelByHref(navigationToc, chapterHref);
+    if (chapterLabel) {
+        return `[${chapterLabel}] Page ${$("#current_page_value").text()}`;
     }
-    return chapter_title;
+    return `Page ${$("#current_page_value").text()}`;
 }
 
-// Page tracker interactivity: click to edit page number, drag to navigate
+function renderPageTrackerDisplay(currentPage, totalPages) {
+    $('#currentPages').html(`<h1 class="main-text"><span id="current_page_value" class="text-sb">${currentPage}</span> of <span id="total_page_value">${totalPages}</span></h1>`);
+}
+
+function renderPageTrackerEditor(currentPage, totalPages) {
+    $('#currentPages').html(`<h1 class="main-text"><input type="text" inputmode="numeric" pattern="[0-9]*" id="page-number-input" class="text-sb" value="${currentPage}" aria-label="Page number"> of <span id="total_page_value">${totalPages}</span></h1>`);
+}
+
 function initializePageTrackerInteractivity() {
     const $currentPages = $('#currentPages');
-    let isEditing = false;
-    let isDragging = false;
-    let dragStartY = 0;
-    let dragStartPercentage = 0;
-
-    // Click handler: switch to edit mode
-    $currentPages.on('click', function(e) {
-        if (isEditing) return;
-        isEditing = true;
-        $currentPages.addClass('edit-mode');
-        
-        const currentPage = parseInt($('#current_page_value').text());
-        const totalPages = parseInt($('#total_page_value').text());
-        
-        // Replace with input field
-        const inputHtml = `<input type="number" id="page-number-input" min="1" max="${totalPages}" value="${currentPage}">`;
-        $currentPages.html(inputHtml);
-        
-        const $input = $('#page-number-input');
-        $input.focus();
-        $input.select();
-        
-        // Handle enter key to confirm
-        $input.on('keydown', function(e) {
-            if (e.key === 'Enter') {
-                confirmPageJump();
-            } else if (e.key === 'Escape') {
-                cancelEditMode();
-            }
-        });
-        
-        // Handle blur to confirm
-        $input.on('blur', function() {
-            setTimeout(confirmPageJump, 100);
-        });
-    });
-
-    function confirmPageJump() {
-        if (!isEditing) return;
-        
-        const newPage = parseInt($('#page-number-input').val());
-        const totalPages = parseInt($('#total_page_value').text());
-        
-        if (isNaN(newPage) || newPage < 1 || newPage > totalPages) {
-            cancelEditMode();
-            return;
-        }
-        
-        // Calculate percentage and jump to page
-        const percentage = (newPage - 1) / totalPages;
-        const cfi = book_epub.locations.cfiFromPercentage(percentage);
-        
-        if (cfi) {
-            book_rendition.display(cfi);
-        }
-        
-        isEditing = false;
-        // The display() call will trigger 'relocated' which will update updatePageNumber()
+    if (!$currentPages.length) {
+        return;
     }
 
-    function cancelEditMode() {
-        if (!isEditing) return;
-        
-        // Restore original display
-        const currentPage = Math.floor(book_epub.locations.total * book_epub.locations.percentageFromCfi(book_rendition.currentLocation().start.cfi));
-        const totalPages = book_epub.locations.total;
-        
-        $currentPages.html(`<h1 class="main-text"><span id="current_page_value" class="text-sb">${currentPage}</span> of <span id="total_page_value">${totalPages}</span></h1>`);
+    let isEditing = false;
+    $currentPages.off('.pageTracker');
+    $(document).off('.pageTracker');
+
+    function getTotalPages() {
+        return Number(book_epub?.locations?.total) || 0;
+    }
+
+    function getRenderedCurrentPage() {
+        const currentCfi = book_rendition?.currentLocation()?.start?.cfi;
+        const totalPages = getTotalPages();
+        const percentage = currentCfi ? (book_epub.locations.percentageFromCfi(currentCfi) || 0) : 0;
+        return Math.floor(percentage * totalPages);
+    }
+
+    function leaveEditMode() {
+        const currentPage = getRenderedCurrentPage();
+        const totalPages = getTotalPages();
+        renderPageTrackerDisplay(currentPage, totalPages);
         $currentPages.removeClass('edit-mode');
         isEditing = false;
     }
 
-    // Drag handler: click and drag to navigate
-    $currentPages.on('mousedown', function(e) {
-        if (isEditing) return;
-        isDragging = true;
-        dragStartY = e.clientY;
-        dragStartPercentage = book_epub.locations.percentageFromCfi(book_rendition.currentLocation().start.cfi) || 0;
-        $currentPages.addClass('dragging');
-        e.preventDefault();
-    });
+    function enterEditMode() {
+        const currentPage = getRenderedCurrentPage();
+        const totalPages = getTotalPages();
+        isEditing = true;
+        $currentPages.addClass('edit-mode');
+        renderPageTrackerEditor(currentPage, totalPages);
+        $('#page-number-input').trigger('focus').trigger('select');
+    }
 
-    $(document).on('mousemove', function(e) {
-        if (!isDragging) return;
-        
-        const deltaY = e.clientY - dragStartY;
-        // Sensitivity: every 5 pixels of drag = 1% of book
-        const deltaPercentage = (deltaY / 5) / 100;
-        const newPercentage = Math.max(0, Math.min(1, dragStartPercentage + deltaPercentage));
-        
-        const cfi = book_epub.locations.cfiFromPercentage(newPercentage);
+    function confirmPageJump() {
+        if (!isEditing) {
+            return;
+        }
+
+        const totalPages = getTotalPages();
+        const newPage = Number.parseInt($('#page-number-input').val(), 10);
+
+        if (!Number.isFinite(newPage) || newPage < 1 || newPage > totalPages) {
+            leaveEditMode();
+            return;
+        }
+
+        renderPageTrackerDisplay(newPage, totalPages);
+        $currentPages.removeClass('edit-mode');
+        isEditing = false;
+
+        const percentage = totalPages > 0 ? ((newPage - 1) / totalPages) : 0;
+        const cfi = book_epub.locations.cfiFromPercentage(percentage);
         if (cfi) {
-            try {
-                book_rendition.display(cfi);
-            } catch(e) {}
+            book_rendition.display(cfi);
+        }
+    }
+
+    $currentPages.on('click.pageTracker', function(e) {
+        e.stopPropagation();
+        if (!isEditing) {
+            enterEditMode();
         }
     });
 
-    $(document).on('mouseup', function(e) {
-        if (isDragging) {
-            isDragging = false;
-            $currentPages.removeClass('dragging');
+    $currentPages.on('click.pageTracker', '#page-number-input', function(e) {
+        e.stopPropagation();
+    });
+
+    $currentPages.on('keydown.pageTracker', '#page-number-input', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmPageJump();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            leaveEditMode();
+        }
+    });
+
+    $currentPages.on('focusout.pageTracker', function() {
+        window.setTimeout(function() {
+            if (isEditing && $(document.activeElement).closest('#currentPages').length === 0) {
+                leaveEditMode();
+            }
+        }, 0);
+    });
+
+    $(document).on('click.pageTracker', function(e) {
+        if (isEditing && $(e.target).closest('#currentPages').length === 0) {
+            leaveEditMode();
         }
     });
 }

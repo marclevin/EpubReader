@@ -29,7 +29,12 @@
                     class="main-text text-color-black text-sb cursor-pointer text-decoration-none no-drag"
                     onclick="saveBeforeClose();">Library</a>
             </div>
-            <div class="flex-1 header-spacer"></div>
+            <div id="reader-navbar-meta" class="flex-1 flex-row flex-h-center">
+                <div id="reader-navbar-pill" class="no-drag" title="Loading chapter">
+                    <span id="reader-navbar-pill-prefix" class="main-text">Reading</span>
+                    <span id="reader-navbar-chapter" class="main-text text-sb">Opening book...</span>
+                </div>
+            </div>
             <div class="flex-row flex-v-center gap-15 no-drag header-right">
                 <div class="flex-row flex-v-center gap-30 no-drag">
                     <div class="flex-column" style="position: relative;">

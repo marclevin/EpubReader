@@ -8,11 +8,12 @@
 #main-navbar {
     height: 64px;
     padding: 0 20px;
+    position: relative;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    z-index: 50;
+    z-index: 260000;
     width: 100%;
     -webkit-user-select: none;
     user-select: none;
@@ -21,6 +22,38 @@
 }
 
 #main-navbar .no-drag { -webkit-app-region: no-drag; }
+
+#reader-navbar-meta {
+    min-width: 0;
+    padding: 0 24px;
+}
+
+#reader-navbar-pill {
+    min-width: 0;
+    max-width: min(52vw, 620px);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.045);
+    border: 1px solid rgba(0,0,0,0.08);
+}
+
+#reader-navbar-pill-prefix {
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    opacity: .55;
+    white-space: nowrap;
+}
+
+#reader-navbar-chapter {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 #close-app-icon,
 #minimize-app-icon {
@@ -72,7 +105,7 @@
     border-radius: 8px;
     background-color: white;
     box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    z-index: 200000; /* very high to sit above iframes */
+    z-index: 280000; /* above reader chrome and iframe content */
 }
 .book-navbar-popup:not(#reading-settings) { overflow: hidden; }
 
@@ -81,6 +114,8 @@
     right: 16px;
     top: calc(64px + 8px); /* fixed header height + gap */
     width: 330px;
+    overflow: visible;
+    isolation: isolate;
 }
 
 #book-info { left: 0; width: 350px; }
@@ -213,7 +248,7 @@ body.book-sidebar-open #book-container { padding-left: calc(var(--rail-width) + 
 
 #book-chapters { padding: 25px 15px; }
 
-#book-chapters h1 { padding: 2vh; cursor: pointer; border-radius: 5px; transition: background-color .2s; font-size: 13px; font-weight: 500; }
+#book-chapters h1 { padding: 10px 12px; cursor: pointer; border-radius: 5px; transition: background-color .2s; font-size: 13px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
 #book-chapters h1::before { content: '•'; margin-right: 5px; }
 #book-chapters h1:hover { background-color: rgba(0,0,0,.1); }
 
@@ -252,10 +287,12 @@ body.book-sidebar-open #book-container { padding-left: calc(var(--rail-width) + 
 #currentPages:hover { background-color: rgba(0,0,0,.15); }
 
 #currentPages.edit-mode { cursor: text; }
-
 #page-number-input { 
-    border: none; 
+    border: none;
     background: transparent; 
+    appearance: textfield;
+    -moz-appearance: textfield;
+    -webkit-appearance: none;
     text-align: center; 
     font-size: inherit; 
     font-weight: inherit; 
@@ -266,7 +303,11 @@ body.book-sidebar-open #book-container { padding-left: calc(var(--rail-width) + 
     padding: 2px 4px; 
 }
 
-#currentPages.dragging { cursor: grabbing; }
+#page-number-input::-webkit-outer-spin-button,
+#page-number-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
 
 /* Dark mode styling for interactive page tracker */
 .page-color-style-dark-bg #currentPages { background-color: rgba(248,248,242,.1); }
@@ -274,9 +315,9 @@ body.book-sidebar-open #book-container { padding-left: calc(var(--rail-width) + 
 .page-color-style-dark-bg #page-number-input { border-bottom-color: rgba(248,248,242,.3); color: #F8F8F2; }
 
 #typeface-section { filter: brightness(.95); padding: 1vh; border-radius: 5px; background-color: white; border: .5px solid rgba(0,0,0,.05); cursor: pointer; }
-#typeface-settings { position: relative; }
+#typeface-settings { position: relative; z-index: 1; }
 #typeface-section:focus { outline: none; }
-#typeface-option { position: absolute; display: none; margin-top: 5px; border-radius: 5px; background-color: white; filter: brightness(.95); padding: 1vh; border: .5px solid white; }
+#typeface-option { position: fixed; display: none; margin-top: 0; border-radius: 8px; background-color: white; filter: brightness(.98); padding: 1vh; border: .5px solid rgba(0,0,0,.06); box-shadow: 0 16px 30px rgba(0,0,0,.18); }
 #typeface-option h1 { padding: 1vh; cursor: pointer; border-radius: 5px; }
 
 #lang-select { border: none; outline: none; scroll-behavior: smooth; }
@@ -286,7 +327,40 @@ body.book-sidebar-open #book-container { padding-left: calc(var(--rail-width) + 
 @keyframes settings-font-click-animation { 0% { background-color: rgba(0,0,0,0) } 50% { background-color: rgba(0,0,0,.1) } 100% { background-color: rgba(0,0,0,0) } }
 
 /* Ensure nested dropdowns appear above the book iframe */
-#typeface-option { z-index: 250000; }
+#typeface-option { z-index: 290000; }
+
+.page-color-style-dark-bg #reader-navbar-pill {
+    background: rgba(248,248,242,.08);
+    border-color: rgba(248,248,242,.1);
+}
+
+.page-color-style-dark-bg #reader-navbar-pill-prefix {
+    opacity: .7;
+}
+
+.page-color-style-dark-bg #typeface-option {
+    background: #383A49;
+    border-color: rgba(248,248,242,.08);
+}
+
+.page-color-style-brown-bg #reader-navbar-pill {
+    background: rgba(91,70,54,.08);
+    border-color: rgba(91,70,54,.12);
+}
+
+@media (max-width: 960px) {
+    #reader-navbar-meta {
+        padding: 0 12px;
+    }
+
+    #reader-navbar-pill {
+        max-width: min(42vw, 360px);
+    }
+
+    #reader-navbar-pill-prefix {
+        display: none;
+    }
+}
 
 /* smaller chevrons for previous/next */
 #previous-chapter-btn, #next-chapter-btn { width: 12px; height: 24px; }

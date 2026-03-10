@@ -163,10 +163,29 @@ function loadLayoutHandler(layout) {
 }
 
 function handleTypeFaceSelection() {
-    $('#typeface-option').toggle()
+    const $typefaceOption = $('#typeface-option');
+    if ($typefaceOption.is(':visible')) {
+        $typefaceOption.hide();
+        return;
+    }
+
+    const trigger = document.getElementById('typeface-section');
+    if (!trigger) {
+        $typefaceOption.toggle();
+        return;
+    }
+
+    const rect = trigger.getBoundingClientRect();
+    $typefaceOption.css({
+        top: (rect.bottom + 8) + 'px',
+        left: rect.left + 'px',
+        width: rect.width + 'px',
+        minWidth: rect.width + 'px'
+    }).show();
 }
 function handleChangeFont(fontText,fontValue){
     $('#typeface-section-text').text(fontText);
     book_rendition.themes.font(fontValue);
     current_style_settings.book.typeface = fontValue; 
+    $('#typeface-option').hide();
 }
