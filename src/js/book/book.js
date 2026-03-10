@@ -41,6 +41,14 @@ var loadBook = async function(styleSettings = null) {
 		width: styleSettings?.width ?? '100%',
 	}
 
+    // Toggle layout marker class on wrapper (for spine styling)
+    $('#book-content-columns-wrapper').removeClass('layout-paginated layout-scrolled');
+    if ((styleSettings?.flow ?? 'paginated') === 'paginated') {
+        $('#book-content-columns-wrapper').addClass('layout-paginated');
+    } else {
+        $('#book-content-columns-wrapper').addClass('layout-scrolled');
+    }
+
     // Get book code by url param
     epubCodeSearch = window.location.search.substring(1).split("=")[1];
 
@@ -121,8 +129,8 @@ var loadBook = async function(styleSettings = null) {
             $('.book-navbar-popup').hide();
             $('#book-action-menu').hide();
         });
-        // Add main color selection background 
-        iframe.find('head').append("<style>::selection { background-color: #E3B230;}</style>");
+        // Apply selection + link styles inside EPUB iframe based on current theme
+        injectEpubStyles(current_style_settings?.book?.background_color_style);
 		// Spawn action menu on right click if something selected
         iframe.on('contextmenu', function (e) {
             const somethingSelected = $('iframe')[0].contentWindow.getSelection().toString().trim().length > 0
@@ -137,20 +145,50 @@ var loadBook = async function(styleSettings = null) {
         // Update save button
         updateSavePagesButton(book_saved_pages, start_cfi);
 
-		// Update global variable with current section href
+        // Update global variable with current section href
         current_section_href = section.href;
+        // Highlight active chapter in the sidebar
+        try {
+            $('#book-chapters [data-href]').removeClass('active');
+            $('#book-chapters [data-href="' + current_section_href + '"]').addClass('active');
+            // Also try exact dataset matching
+            $('#book-chapters [data-href]').filter(function () { return $(this).data('href') === current_section_href; }).addClass('active');
+        } catch (e) { }
     })
+
+    // Update progress on relocate (page/section change)
+    book_rendition.on('relocated', function (location) {
+        try {
+            const cfi = location?.start?.cfi || book_rendition.currentLocation().start?.cfi;
+            updatePageNumber(cfi);
+            updateSavePagesButton(book_saved_pages, cfi);
+        } catch(e) {}
+    });
+
+    // Initialize page tracker interactivity (click to edit, drag to navigate)
+    initializePageTrackerInteractivity();
 
     // Load book styles in navbar
 	await loadBookStyleSettings();
 }
 
+// React to app-wide theme changes (triggered by theme picker)
+window.addEventListener('appThemeChanged', function (e) {
+    const theme = e?.detail?.theme;
+    if (typeof loadBookStyleSettings === 'function' && typeof book_rendition !== 'undefined' && book_rendition) {
+        loadBookStyleSettings(theme);
+    }
+});
+
 async function updatePageNumber(cfi) {
     var total_pages = book_epub.locations.total;
-    var progress = Math.floor(book_epub.locations.percentageFromCfi(cfi) * total_pages);
+    var pct = book_epub.locations.percentageFromCfi(cfi) || 0;
+    var progress = Math.floor(pct * total_pages);
     $('#current_page_value').text(progress);
     $('#total_page_value').text(total_pages);
     $('#book-info-pages').text(total_pages);
+    // Update thin progress bar width
+    try { $('#reading-progress-bar').css('width', Math.max(0, Math.min(100, Math.round(pct * 100))) + '%'); } catch(e) {}
 }
 
 async function loadBookInfo(info){
@@ -295,7 +333,7 @@ function recursiveChapterHtml(array,level) {
     array.forEach((item) => {
         var op = item.label ? "" : "op-5";
         var bold = level == 1 ? 'text-sb' : '';
-        finalHtml += `<h1 class="main-text ${op} ${bold}" onclick="book_rendition.display('${item.href}')">${item.label}</h1>`;
+        finalHtml += `<h1 class="main-text ${op} ${bold}" data-href="${item.href}" onclick="book_rendition.display('${item.href}')">${item.label}</h1>`;
         if (item.subitems.length > 0) {
             finalHtml += recursiveChapterHtml(item.subitems, level+1);
         }
@@ -409,10 +447,76 @@ async function loadBookStyleSettings(newStyleColor = null) {
     applyThemeStyles(current_style_settings.book.background_color_style);
 }
 
+function injectEpubStyles(theme) {
+    const isDark = theme === 'dark';
+    const selectionColor = isDark ? '#44475A' : '#ADD6FF'; // VSCode-like
+    const linkColor = isDark ? '#8BE9FD' : '#1E69DB';
+    const linkHover = isDark ? '#FF79C6' : '#1753AD';
+    const linkDeco = isDark ? 'rgba(139, 233, 253, .35)' : 'rgba(0,0,0,.35)';
+    $('iframe').each(function(){
+        const $doc = $(this).contents();
+        if (!$doc || !$doc.length) return;
+                $doc.find('#epub-theme-injected').remove();
+                $doc.find('#epub-theme-script').remove();
+                $doc.find('head').append(`
+                        <style id="epub-theme-injected">
+                                html, body { background: ${isDark ? '#282A36' : '#FFFFFF'} !important; color: ${isDark ? '#F8F8F2' : '#000000'} !important; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+                                p, li, h1, h2, h3, blockquote { line-height: 1.6 !important; }
+                                /* selection per-element */
+                                p::selection, li::selection, h1::selection, h2::selection, h3::selection, td::selection, th::selection, blockquote::selection, pre::selection, code::selection, span::selection, div::selection { background: ${selectionColor}; color: inherit; }
+                                sup::selection, sub::selection { background: transparent; color: inherit; }
+                                /* Only style real links (have href). Do not style anchors with only id (toc anchors). */
+                                a:not([href]) { text-decoration: none !important; color: inherit !important; cursor: default !important; }
+                                a[href], a[href]:visited { color: ${linkColor} !important; text-decoration: underline; text-decoration-color: ${linkDeco}; text-underline-offset: 2px; text-decoration-skip-ink: auto; }
+                                a[href]:hover { color: ${linkHover} !important; text-decoration-color: ${linkHover}; }
+                                /* Keep superscripts selectable but don't let them trigger big selections */
+                                sup, sub { user-select: text !important; -webkit-user-select: text !important; }
+                                a sup, a > sup { text-decoration: none; }
+                        </style>
+                        <script id="epub-theme-script">
+                        (function(){
+                            // When user clicks/taps on a superscript, avoid accidental large paragraph selection.
+                            function handleSupPointer(e){
+                                try {
+                                    var node = e.target;
+                                    while(node && node !== document){
+                                        if(node.nodeType===1 && node.tagName && node.tagName.toLowerCase() === 'sup'){
+                                            // Defer to after default browser handling
+                                            setTimeout(function(){
+                                                try{
+                                                    var sel = document.getSelection();
+                                                    if(!sel) return;
+                                                    if(sel.isCollapsed) return;
+                                                    var range = sel.getRangeAt(0);
+                                                    if(!range) return;
+                                                    // If selection started or ended inside this sup, collapse caret after sup
+                                                    if(node.contains(range.startContainer) || node.contains(range.endContainer)){
+                                                        var r = document.createRange();
+                                                        r.setStartAfter(node);
+                                                        r.collapse(true);
+                                                        sel.removeAllRanges();
+                                                        sel.addRange(r);
+                                                    }
+                                                }catch(e){}
+                                            }, 0);
+                                            break;
+                                        }
+                                        node = node.parentNode;
+                                    }
+                                } catch(e){}
+                            }
+                            document.addEventListener('mousedown', handleSupPointer, true);
+                            document.addEventListener('touchstart', handleSupPointer, true);
+                        })();
+                        </script>
+                `);
+    });
+}
+
 // Helper function to apply theme styles
 function applyThemeStyles(theme) {
     const backgroundElements = $('#book-container, #main-navbar, .book-navbar-popup, #typeface-option, #typeface-section, #book-action-menu, .dictionary-audio-button, #currentPagesContainer');
-    const iconElements = $('#show-book-chapters, #show-book-saved, #show-book-info, #show-reading-settings, #libraryNavBtn, #show-dictionary-popup');
+    const iconElements = $('#rail-chapters-btn, #rail-info-btn, #rail-save-btn, #show-reading-settings, #libraryNavBtn');
     const textElements = $('#currentPages h1');
 
     // Get the previous and next chapter or page buttons
@@ -453,6 +557,7 @@ function applyThemeStyles(theme) {
 
     // Reset classes
     backgroundElements.removeClass('page-color-style-brown-bg page-color-style-dark-bg');
+    $('#book-content-columns-wrapper').removeClass('spine-visible');
     iconElements.removeClass('page-color-style-brown-color page-color-style-dark-color');
     textElements.css('color', '');
 
@@ -487,7 +592,9 @@ function applyThemeStyles(theme) {
     // Apply theme-specific styles
     switch (theme) {
         case "brown":
-            book_rendition.themes.default({ body: { 'color': '#5B4636' } });
+            // Register and select a theme for immediate application
+            book_rendition.themes.register('brown-ui', { body: { 'color': '#5B4636', 'background': '#F8F1E2' }, a: { 'color': '#1E69DB' } });
+            book_rendition.themes.select('brown-ui');
             backgroundElements.addClass('page-color-style-brown-bg');
             iconElements.addClass('page-color-style-brown-color');
             textElements.css('color', '#5B4636');
@@ -505,7 +612,7 @@ function applyThemeStyles(theme) {
             verticalDivider.css('background-color', '#5B4636');
             horizontalDivider.css('background-color', '#5B4636');
             typefaceSectionSVG.css('fill', '#5B4636');
-            selectFontFamily.css('background-color', '#5B4636', 'color', 'white');
+            selectFontFamily.css({ 'background-color': '#F8F1E2', 'color': '#5B4636' });
 
             bookInfoH1.css('color', '#5B4636')
             bookInfoSpan.css('color', '#5B4636')
@@ -522,43 +629,57 @@ function applyThemeStyles(theme) {
             dictionaryPopupOlLi.css('color', '#5B4636')*/
             break;
         case "dark":
-            book_rendition.themes.default({ body: { 'color': 'white' } });
+            book_rendition.themes.register('dracula', {
+                body: { 'color': '#F8F8F2', 'background': '#282A36' },
+                a: { 'color': '#8BE9FD', 'text-decoration': 'underline', 'text-underline-offset': '2px' }
+            });
+            book_rendition.themes.select('dracula');
             backgroundElements.addClass('page-color-style-dark-bg');
+            $('#book-content-columns-wrapper').addClass('spine-visible');
             iconElements.addClass('page-color-style-dark-color');
-            textElements.css('color', 'white');
+            textElements.css('color', '#F8F8F2');
 
-            previousChapterBtn.css('fill', 'white');
-            nextChapterBtn.css('fill', 'white');
+            previousChapterBtn.css('fill', '#F8F8F2');
+            nextChapterBtn.css('fill', '#F8F8F2');
 
-            closeAppBtn.css('stroke', 'white');
-            resizeAppBtn.css('fill', 'white');
-            maximizeAppBtn.css('stroke', 'white');
-            minimizeAppBtn.css('stroke', 'white');
+            closeAppBtn.css('stroke', '#F8F8F2');
+            resizeAppBtn.css('fill', '#F8F8F2');
+            maximizeAppBtn.css('stroke', '#F8F8F2');
+            minimizeAppBtn.css('stroke', '#F8F8F2');
 
-            readingSettingsSpan.css('color', 'white');
-            readingSettingsH1.css('color', 'white');
-            verticalDivider.css('background-color', 'white');
-            horizontalDivider.css('background-color', 'white');
-            typefaceSectionSVG.css('fill', 'white');
-            selectFontFamily.css('background-color', 'black', 'color', 'white');
+            readingSettingsSpan.css('color', '#F8F8F2');
+            readingSettingsH1.css('color', '#F8F8F2');
+            verticalDivider.css('background-color', '#44475A');
+            horizontalDivider.css('background-color', '#44475A');
+            typefaceSectionSVG.css('fill', '#F8F8F2');
+            selectFontFamily.css({ 'background-color': '#343746', 'color': '#F8F8F2' });
             
-            bookInfoH1.css('color', 'white')
-            bookInfoSpan.css('color', 'white')
+            bookInfoH1.css('color', '#F8F8F2')
+            bookInfoSpan.css('color', '#F8F8F2')
 
-            bookChaptersH1.css('color', 'white')
+            bookChaptersH1.css('color', '#F8F8F2')
 
-            bookSavedPagesH1.css('color', 'white')
-            bookSavedPagesH2.css('color', 'white')
-            bookSaveButton.css('fill', 'white')
-            bookUnsaveButton.css({ 'border': '1px solid white', 'background-color': '#1A1A1A' })
+            bookSavedPagesH1.css('color', '#F8F8F2')
+            bookSavedPagesH2.css('color', '#F8F8F2')
+            bookSaveButton.css('fill', '#F8F8F2')
+            bookUnsaveButton.css({ 'border': '1px solid #F8F8F2', 'background-color': '#282A36' })
+
+            // Inject selection + link style in current iframe
+            injectEpubStyles('dark');
 
             /*dictionaryPopupH1.css('color', 'white')
             dictionaryPopupH2.css('color', 'white')
             dictionaryPopupOlLi.css('color', 'white')*/
             break;
         default: // Default to light theme
-            book_rendition.themes.default({ body: { 'color': 'black' } });
+            book_rendition.themes.register('light-ui', {
+                body: { 'color': 'black', 'background': '#FFFFFF' },
+                a: { 'color': '#1E69DB', 'text-decoration': 'underline', 'text-underline-offset': '2px' }
+            });
+            book_rendition.themes.select('light-ui');
             textElements.css('color', 'black');
+            // Ensure iframe link + selection revert to light
+            injectEpubStyles('light');
     }
 }
 
@@ -605,6 +726,115 @@ var getCurrentChapterLabelByHref = async function(navigationToc,chapterHref){
         }
     }
     return chapter_title;
+}
+
+// Page tracker interactivity: click to edit page number, drag to navigate
+function initializePageTrackerInteractivity() {
+    const $currentPages = $('#currentPages');
+    let isEditing = false;
+    let isDragging = false;
+    let dragStartY = 0;
+    let dragStartPercentage = 0;
+
+    // Click handler: switch to edit mode
+    $currentPages.on('click', function(e) {
+        if (isEditing) return;
+        isEditing = true;
+        $currentPages.addClass('edit-mode');
+        
+        const currentPage = parseInt($('#current_page_value').text());
+        const totalPages = parseInt($('#total_page_value').text());
+        
+        // Replace with input field
+        const inputHtml = `<input type="number" id="page-number-input" min="1" max="${totalPages}" value="${currentPage}">`;
+        $currentPages.html(inputHtml);
+        
+        const $input = $('#page-number-input');
+        $input.focus();
+        $input.select();
+        
+        // Handle enter key to confirm
+        $input.on('keydown', function(e) {
+            if (e.key === 'Enter') {
+                confirmPageJump();
+            } else if (e.key === 'Escape') {
+                cancelEditMode();
+            }
+        });
+        
+        // Handle blur to confirm
+        $input.on('blur', function() {
+            setTimeout(confirmPageJump, 100);
+        });
+    });
+
+    function confirmPageJump() {
+        if (!isEditing) return;
+        
+        const newPage = parseInt($('#page-number-input').val());
+        const totalPages = parseInt($('#total_page_value').text());
+        
+        if (isNaN(newPage) || newPage < 1 || newPage > totalPages) {
+            cancelEditMode();
+            return;
+        }
+        
+        // Calculate percentage and jump to page
+        const percentage = (newPage - 1) / totalPages;
+        const cfi = book_epub.locations.cfiFromPercentage(percentage);
+        
+        if (cfi) {
+            book_rendition.display(cfi);
+        }
+        
+        isEditing = false;
+        // The display() call will trigger 'relocated' which will update updatePageNumber()
+    }
+
+    function cancelEditMode() {
+        if (!isEditing) return;
+        
+        // Restore original display
+        const currentPage = Math.floor(book_epub.locations.total * book_epub.locations.percentageFromCfi(book_rendition.currentLocation().start.cfi));
+        const totalPages = book_epub.locations.total;
+        
+        $currentPages.html(`<h1 class="main-text"><span id="current_page_value" class="text-sb">${currentPage}</span> of <span id="total_page_value">${totalPages}</span></h1>`);
+        $currentPages.removeClass('edit-mode');
+        isEditing = false;
+    }
+
+    // Drag handler: click and drag to navigate
+    $currentPages.on('mousedown', function(e) {
+        if (isEditing) return;
+        isDragging = true;
+        dragStartY = e.clientY;
+        dragStartPercentage = book_epub.locations.percentageFromCfi(book_rendition.currentLocation().start.cfi) || 0;
+        $currentPages.addClass('dragging');
+        e.preventDefault();
+    });
+
+    $(document).on('mousemove', function(e) {
+        if (!isDragging) return;
+        
+        const deltaY = e.clientY - dragStartY;
+        // Sensitivity: every 5 pixels of drag = 1% of book
+        const deltaPercentage = (deltaY / 5) / 100;
+        const newPercentage = Math.max(0, Math.min(1, dragStartPercentage + deltaPercentage));
+        
+        const cfi = book_epub.locations.cfiFromPercentage(newPercentage);
+        if (cfi) {
+            try {
+                book_rendition.display(cfi);
+            } catch(e) {}
+        }
+    });
+
+    $(document).on('mouseup', function(e) {
+        if (isDragging) {
+            isDragging = false;
+            $currentPages.removeClass('dragging');
+        }
+    });
 }
 
 

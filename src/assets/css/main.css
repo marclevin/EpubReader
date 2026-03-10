@@ -95,6 +95,41 @@ img {
 	opacity: .2;
 	height: .5px;
 }
+
+/* Shared Dracula (dark) theme helpers available across pages */
+.page-color-style-dark-bg {
+	background-color: #282A36 !important;
+}
+.page-color-style-dark-color {
+	color: #F8F8F2 !important;
+	fill: #F8F8F2;
+}
+.page-color-style-dark-bg .main-text {
+	color: #F8F8F2 !important;
+}
+#main-navbar.page-color-style-dark-bg {
+	border-bottom: .5px solid #44475A;
+}
+.page-color-style-dark-bg .vertical-divider-05,
+.page-color-style-dark-bg .horizontal-divider-05 {
+	background-color: #44475A !important;
+	opacity: .85;
+}
+.page-color-style-dark-bg a {
+	color: #8BE9FD;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	text-decoration-color: rgba(139, 233, 253, .35);
+}
+.page-color-style-dark-bg a:hover {
+	color: #FF79C6;
+	text-decoration-color: #FF79C6;
+}
+
+/* SVG icon theming for dark mode */
+.page-color-style-dark-bg svg { color: #F8F8F2; }
+.page-color-style-dark-bg svg [stroke] { stroke: #F8F8F2 !important; }
+.page-color-style-dark-bg svg [fill]:not([fill="none"]) { fill: #F8F8F2 !important; }
 .flex-row {
 	display: flex;
 	flex-direction: row;
